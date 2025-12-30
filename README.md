@@ -11,20 +11,43 @@ source venv/bin/activate
 ### install dependencies 
 pip install requirements.txt
 
+### to run the model
+python main.py (to train the model)
+python check_training_predictions.py (for analysis)
+python webcam.py (to run the model)
+
+
 ### Project Structure
 
 SilentVoice/
 │
-├── asl_dataset.py          # Dataset + padding logic
-├── extract_landmarks.py    # Converts videos → landmark arrays
-├── train_lstm.py           # Trains word-level LSTM
-├── main.py                # runs camera with the trained .npt files
-├── webcam-test.py         # Real-time webcam inference test
-├── asl_lstm_test.pt        # Trained model (small demo model for now)
+├── asl_dataset.py                # Dataset loader (normalization, padding, masking)
+├── train_lstm.py                 # Trains the word-level ASL BiLSTM model
+├── check_training_predictions.py # Verifies which words the model has learned
+├── webcam.py                     # Real-time webcam inference (where it runs)
+├── webcam-test.py                # Experimental / debugging webcam inference
+├── infer.py                      # Offline inference on saved landmark files
+├── main.py                       # Entry-point wrapper
 │
-└── data/
-    ├── videos/             # raw ASL videos (add to .gitignore)
-    └── landmarks/          # Extracted hand landmarks (.npy)
+├── video_landmark_extractor.py   # Robust video → landmark extraction pipeline
+├── extract_coordinates.py        # Landmark extraction runner
+├── download_vids.py              # Downloads ASL videos from MS-ASL metadata
+│
+├── asl_lstm_test.pt              # Trained demo model checkpoint
+├── requirements.txt              # Python dependencies
+├── README.md                     # Project documentation
+├── .gitignore
+│
+├── data/
+│   ├── videos/                   # Raw ASL videos (.mp4)  (in gitignore)
+│   ├── landmarks/                # Extracted hand landmarks (.npy)
+│   ├── fails/
+│   │   ├── failed_videos.txt     # Videos that could not be decoded
+│   │   └── failed_landmark_extraction.txt
+│   └── msasl_small.json          # Subset of MS-ASL used for downloading videos
+│
+├── MS-ASL/                       # Full MS-ASL metadata/resources
+├── venv/                         # Virtual environment (ignored)
 
 
 
@@ -40,6 +63,9 @@ winget install ffmpeg
 ### download the videos
 python download_videos.py
 
-### run the AI model on the updated dataset
-python train_lstm (preliminary).py
+### write the model in train_lstm.py and train it in main.py
+python main.py
+
+### run the model in webcam.py
+python webcam.py
 
