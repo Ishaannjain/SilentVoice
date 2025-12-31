@@ -275,3 +275,57 @@ if __name__ == '__main__':
     print(f"Optimizer: Adam (lr={LEARNING_RATE})")
     print(f"Scheduler: ReduceLROnPlateau (reduces LR if validation loss plateaus)")
     print("\n✓ Training setup complete!")
+
+
+    # Training loop
+    print("\n" + "="*50)
+    print("Starting Training")
+    print("="*50)
+    
+    train_losses, train_accs = [], []
+    val_losses, val_accs = [], []
+    best_val_acc = 0.0
+    
+    import time
+    start_time = time.time()
+    
+    for epoch in range(NUM_EPOCHS):
+        epoch_start = time.time()
+        
+        print(f"\nEpoch [{epoch+1}/{NUM_EPOCHS}]")
+        print("-" * 50)
+        
+        # Train
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+        
+        # Validate
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        # Save metrics
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
+        val_losses.append(val_loss)
+        val_accs.append(val_acc)
+        
+        # Learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Print results
+        epoch_time = time.time() - epoch_start
+        print(f"\nResults:")
+        print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
+        print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+        print(f"  Time: {epoch_time/60:.2f} minutes")
+        
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'models/best_asl_model.pth')
+            print(f"  ✓ New best model saved! (Val Acc: {val_acc:.2f}%)")
+    
+    total_time = time.time() - start_time
+    print(f"\n{'='*50}")
+    print(f"Training Complete!")
+    print(f"Total time: {total_time/3600:.2f} hours")
+    print(f"Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"{'='*50}")
