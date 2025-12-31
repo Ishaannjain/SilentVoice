@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import os
@@ -179,7 +179,7 @@ if __name__ == "__main__":
                              std=[0.229, 0.224, 0.225])
     ])
 
-    TRAIN_PATH = "data/Datasets/asl_alphabet_train/asl_alphabet_train"
+    TRAIN_PATH = "data/Datasets/asl_alphabet_train"
 
     print("\nChecking path...")
     print(f"Train path exists: {os.path.exists(TRAIN_PATH)}")
@@ -188,11 +188,14 @@ if __name__ == "__main__":
 
     full_train_dataset = datasets.ImageFolder(TRAIN_PATH, transform=train_transforms)
 
-    train_size = int(0.8 * len(full_train_dataset))
-    val_size = len(full_train_dataset) - train_size
-    train_dataset, val_dataset = random_split(full_train_dataset, [train_size, val_size])
-
-    val_dataset = TransformDataset(val_dataset, transform=val_transforms)
+    # 🔥 CHANGED: Use first 200 images for training, next 50 for validation
+    train_indices = list(range(200))
+    val_indices = list(range(200, 250))
+    
+    train_dataset = Subset(full_train_dataset, train_indices)
+    val_dataset_raw = Subset(full_train_dataset, val_indices)
+    
+    val_dataset = TransformDataset(val_dataset_raw, transform=val_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
@@ -203,9 +206,9 @@ if __name__ == "__main__":
     print("\nDataset Info:")
     print(f"Number of classes: {num_classes}")
     print(f"Classes: {class_names}")
-    print(f"Training samples: {train_size}")
-    print(f"Validation samples: {val_size}")
-    print(f"Total samples: {len(full_train_dataset)}")
+    print(f"Training samples: {len(train_dataset)}")
+    print(f"Validation samples: {len(val_dataset)}")
+    print(f"Total samples used: {len(train_dataset) + len(val_dataset)}")
 
     # OPTIONAL: show sample batch (comment out after you verify once)
     print("\nDisplaying sample batch...")
