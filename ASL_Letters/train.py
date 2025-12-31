@@ -173,7 +173,7 @@ if __name__ == '__main__':
     BATCH_SIZE = 32
     LEARNING_RATE = 0.001
     NUM_EPOCHS = 20
-    IMAGE_SIZE = 64
+    IMAGE_SIZE = 200
 
     # Create directory for saving models
     os.makedirs('models', exist_ok=True)
@@ -198,14 +198,15 @@ if __name__ == '__main__':
     ])
 
     # Load only training dataset
-    TRAIN_PATH = 'asl_alphabet_train'
+    TRAIN_PATH = 'C:\\Users\\sanka\\Documentos\\Github Desktop\\SilentVoice\\data\\Datasets\\asl_alphabet_train\\asl_alphabet_train'
+
+
 
     print(f"\nChecking path...")
     print(f"Train path exists: {os.path.exists(TRAIN_PATH)}")
 
     # Load the full training dataset
     full_train_dataset = datasets.ImageFolder(TRAIN_PATH, transform=train_transforms)
-
     # Split into train (80%) and validation (20%)
     train_size = int(0.8 * len(full_train_dataset))
     val_size = len(full_train_dataset) - train_size
@@ -269,9 +270,49 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', 
-                                                      factor=0.5, patience=3, verbose=True)
+                                                      factor=0.5, patience=3)
     
     print(f"Loss Function: CrossEntropyLoss")
     print(f"Optimizer: Adam (lr={LEARNING_RATE})")
     print(f"Scheduler: ReduceLROnPlateau (reduces LR if validation loss plateaus)")
     print("\n✓ Training setup complete!")
+
+print("\n" + "="*50)
+print("Starting Training")
+print("="*50)
+
+best_val_acc = 0.0
+
+for epoch in range(NUM_EPOCHS):
+    print(f"\nEpoch [{epoch+1}/{NUM_EPOCHS}]")
+
+    # Train
+    train_loss, train_acc = train_epoch(
+        model,
+        train_loader,
+        criterion,
+        optimizer,
+        device
+    )
+
+    # Validate
+    val_loss, val_acc = validate(
+        model,
+        val_loader,
+        criterion,
+        device
+    )
+
+    # Step scheduler on validation loss
+    scheduler.step(val_loss)
+
+    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
+    print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.2f}%")
+
+    # Save best model
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save(model.state_dict(), "models/best_asl_cnn.pt")
+        print(f"✓ Saved new best model (Val Acc: {best_val_acc:.2f}%)")
+
+print("\nTraining complete!")

@@ -69,3 +69,13 @@ python main.py
 ### run the model in webcam.py
 python webcam.py
 
+
+# Citations
+Akash Nagaraj. (2018). ASL Alphabet [Data set]. Kaggle. https://doi.org/10.34740/KAGGLE/DSV/29550\
+
+Desai, A., Berger, L., Minakov, F., Milano, N., Singh, C., Pumphrey, K., ... & Bragg, D. (2023). ASL citizen: a community-sourced dataset for advancing isolated sign language recognition. Advances in Neural Information Processing Systems, 36, 76893-76907.
+
+Gangal, A., Kuppahally, A., & Ravindran, M. (n.d.). Sign Language Recognition with Convolutional Neural Networks. Retrieved from https://cs231n.stanford.edu/2024/papers/sign-language-recognition-with-convolutional-neural-networks.pdf
+
+Chavan, S., Yu, X., & Saniie, J. (2021, May 1). Convolutional Neural Network Hand Gesture Recognition for American Sign Language. https://doi.org/10.1109/EIT51626.2021.9491897
+
