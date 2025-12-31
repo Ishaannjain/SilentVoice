@@ -19,6 +19,7 @@ python webcam.py (to run the model)
 
 ### Project Structure
 
+```text
 SilentVoice/
 │
 ├── asl_dataset.py                # Dataset loader (normalization, padding, masking)
@@ -39,7 +40,7 @@ SilentVoice/
 ├── .gitignore
 │
 ├── data/
-│   ├── videos/                   # Raw ASL videos (.mp4)  (in gitignore)
+│   ├── videos/                   # Raw ASL videos (.mp4) (in gitignore)
 │   ├── landmarks/                # Extracted hand landmarks (.npy)
 │   ├── fails/
 │   │   ├── failed_videos.txt     # Videos that could not be decoded
@@ -47,7 +48,8 @@ SilentVoice/
 │   └── msasl_small.json          # Subset of MS-ASL used for downloading videos
 │
 ├── MS-ASL/                       # Full MS-ASL metadata/resources
-├── venv/                         # Virtual environment (ignored)
+└── venv/                         # Virtual environment (ignored)
+```
 
 
 
