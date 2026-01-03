@@ -1,267 +1,387 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
-import matplotlib.pyplot as plt
-import os
 from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import os
 
-# Function to display a batch of images
-def show_batch(loader, class_names, num_images=8):
-    dataiter = iter(loader)
-    images, labels = next(dataiter)
+# Set device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
 
-    # Denormalize images for display
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-    images = images * std + mean
-    images = torch.clamp(images, 0, 1)
+# Paths
+TRAIN_DIR = r'C:\home\adityasunke04\SilentVoice\data\Datasets\asl_alphabet_train'
+TEST_DIR = r'C:\home\adityasunke04\SilentVoice\data\Datasets\asl_alphabet_test'
 
-    # Plot
-    fig, axes = plt.subplots(2, 4, figsize=(12, 6))
-    for i, ax in enumerate(axes.flat):
-        if i < num_images:
-            img = images[i].permute(1, 2, 0).numpy()  # CHW -> HWC
-            ax.imshow(img)
-            ax.set_title(f"Label: {class_names[labels[i]]}")
-            ax.axis("off")
+# Hyperparameters
+IMG_SIZE = 64
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+EPOCHS = 30
+NUM_WORKERS = 0  # Set to 0 for Windows to avoid multiprocessing issues
 
-    plt.tight_layout()
-    plt.savefig("sample_batch.png")
-    plt.show()
-    print("\nSample batch saved as 'sample_batch.png'")
-
-# Wrapper to apply different transforms to validation set
-class TransformDataset(torch.utils.data.Dataset):
-    def __init__(self, subset, transform=None):
-        self.subset = subset
+# Custom Dataset for Test Images
+class ASLTestDataset(Dataset):
+    """Custom dataset for test images with naming convention: A_test.jpg, B_test.jpg, etc."""
+    
+    def __init__(self, test_dir, class_names, transform=None):
+        self.test_dir = test_dir
         self.transform = transform
-
-    def __getitem__(self, index):
-        if self.transform:
-            original_idx = self.subset.indices[index]
-            img_path, label = self.subset.dataset.samples[original_idx]
-            x = Image.open(img_path).convert("RGB")
-            x = self.transform(x)
-            return x, label
-        else:
-            return self.subset[index]
-
+        self.class_names = class_names
+        
+        # Create class to index mapping
+        self.class_to_idx = {cls: idx for idx, cls in enumerate(class_names)}
+        
+        # Find all test images
+        self.images = []
+        self.labels = []
+        
+        # Look for images matching pattern: CLASS_test.jpg
+        for class_name in class_names:
+            # Try different possible filenames
+            possible_names = [
+                f"{class_name}_test.jpg",
+                f"{class_name.lower()}_test.jpg",
+                f"{class_name.upper()}_test.jpg"
+            ]
+            
+            for img_name in possible_names:
+                img_path = os.path.join(test_dir, img_name)
+                if os.path.exists(img_path):
+                    self.images.append(img_path)
+                    self.labels.append(self.class_to_idx[class_name])
+                    break
+        
+        print(f"Found {len(self.images)} test images")
+        
     def __len__(self):
-        return len(self.subset)
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        img_path = self.images[idx]
+        image = Image.open(img_path).convert('RGB')
+        label = self.labels[idx]
+        
+        if self.transform:
+            image = self.transform(image)
+        
+        return image, label
 
-# ✅ Fixed CNN Model (resolution-safe)
+# Data Transforms
+train_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.RandomRotation(20),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomAffine(degrees=0, translate=(0.2, 0.2), shear=10),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                        std=[0.229, 0.224, 0.225])
+])
+
+test_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                        std=[0.229, 0.224, 0.225])
+])
+
+# Load datasets
+full_train_dataset = datasets.ImageFolder(TRAIN_DIR, transform=train_transform)
+class_names = full_train_dataset.classes
+num_classes = len(class_names)
+
+# Split into train and validation
+train_size = int(0.8 * len(full_train_dataset))
+val_size = len(full_train_dataset) - train_size
+train_dataset, val_dataset = torch.utils.data.random_split(
+    full_train_dataset, [train_size, val_size]
+)
+
+# Create validation dataset with test transform
+val_full_dataset = datasets.ImageFolder(TRAIN_DIR, transform=test_transform)
+val_dataset.dataset = val_full_dataset
+
+# Create custom test dataset
+test_dataset = ASLTestDataset(TEST_DIR, class_names, transform=test_transform)
+
+# Create dataloaders
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, 
+                         shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, 
+                       shuffle=False, num_workers=NUM_WORKERS, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, 
+                        shuffle=False, num_workers=NUM_WORKERS, pin_memory=True)
+
+print(f"\nFound {num_classes} classes: {class_names}")
+print(f"Training samples: {len(train_dataset)}")
+print(f"Validation samples: {len(val_dataset)}")
+print(f"Test samples: {len(test_dataset)}")
+
+# CNN Model
 class ASL_CNN(nn.Module):
     def __init__(self, num_classes):
         super(ASL_CNN, self).__init__()
-
-        self.conv_layers = nn.Sequential(
-            # Block 1
+        
+        # First conv block
+        self.conv1 = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
             nn.MaxPool2d(2, 2),
-
-            # Block 2
+            nn.Dropout(0.25)
+        )
+        
+        # Second conv block
+        self.conv2 = nn.Sequential(
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
             nn.MaxPool2d(2, 2),
-
-            # Block 3
+            nn.Dropout(0.25)
+        )
+        
+        # Third conv block
+        self.conv3 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
             nn.MaxPool2d(2, 2),
-
-            # Block 4
+            nn.Dropout(0.25)
+        )
+        
+        # Fourth conv block
+        self.conv4 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d(2, 2),
-
-            # 🔥 Force output to 4x4 regardless of input resolution
-            nn.AdaptiveAvgPool2d((4, 4))
+            nn.Dropout(0.25)
         )
-
-        self.fc_layers = nn.Sequential(
-            nn.Dropout(0.5),
+        
+        # Fully connected layers
+        self.fc = nn.Sequential(
+            nn.Flatten(),
             nn.Linear(256 * 4 * 4, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(512, num_classes)
         )
-
+        
     def forward(self, x):
-        x = self.conv_layers(x)
-        x = x.view(x.size(0), -1)  # (batch, 256, 4, 4) -> (batch, 4096)
-        x = self.fc_layers(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.fc(x)
         return x
 
-# Training function
+# Create model
+model = ASL_CNN(num_classes).to(device)
+print(f"\nModel created with {num_classes} output classes")
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+print(f"Total trainable parameters: {count_parameters(model):,}")
+
+# Training Functions
 def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
-
-    for batch_idx, (inputs, labels) in enumerate(loader):
+    
+    pbar = tqdm(loader, desc='Training')
+    for inputs, labels in pbar:
         inputs, labels = inputs.to(device), labels.to(device)
-
+        
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
-
         loss.backward()
         optimizer.step()
-
+        
         running_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
+        _, predicted = outputs.max(1)
         total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-
-        if (batch_idx + 1) % 100 == 0:
-            print(f"  Batch [{batch_idx + 1}/{len(loader)}], Loss: {loss.item():.4f}")
-
+        correct += predicted.eq(labels).sum().item()
+        
+        pbar.set_postfix({'loss': running_loss/len(loader), 
+                         'acc': 100.*correct/total})
+    
     epoch_loss = running_loss / len(loader)
-    epoch_acc = 100 * correct / total
+    epoch_acc = 100. * correct / total
     return epoch_loss, epoch_acc
 
-# Validation function
 def validate(model, loader, criterion, device):
     model.eval()
     running_loss = 0.0
     correct = 0
     total = 0
-
+    
     with torch.no_grad():
-        for inputs, labels in loader:
+        for inputs, labels in tqdm(loader, desc='Validating'):
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = model(inputs)
             loss = criterion(outputs, labels)
-
+            
             running_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
+            _, predicted = outputs.max(1)
             total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
+            correct += predicted.eq(labels).sum().item()
+    
     epoch_loss = running_loss / len(loader)
-    epoch_acc = 100 * correct / total
+    epoch_acc = 100. * correct / total
     return epoch_loss, epoch_acc
 
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+# Loss and optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode='min', factor=0.5, patience=3
+)
 
-    # Hyperparameters
-    BATCH_SIZE = 32
-    LEARNING_RATE = 0.001
-    NUM_EPOCHS = 20
-    IMAGE_SIZE = 200  # can be 64, 128, 200, etc. (model now supports any size)
+# Training history
+history = {
+    'train_loss': [], 'train_acc': [],
+    'val_loss': [], 'val_acc': []
+}
 
-    os.makedirs("models", exist_ok=True)
+best_val_acc = 0.0
+patience = 5
+patience_counter = 0
 
-    train_transforms = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.RandomRotation(15),
-        transforms.RandomHorizontalFlip(p=0.3),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-
-    val_transforms = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-
-    TRAIN_PATH = "data/Datasets/asl_alphabet_train"
-
-    print("\nChecking path...")
-    print(f"Train path exists: {os.path.exists(TRAIN_PATH)}")
-    if not os.path.exists(TRAIN_PATH):
-        raise FileNotFoundError(f"Dataset path not found: {TRAIN_PATH}")
-
-    full_train_dataset = datasets.ImageFolder(TRAIN_PATH, transform=train_transforms)
-
-    # 🔥 CHANGED: Use first 200 images for training, next 50 for validation
-    train_indices = list(range(200))
-    val_indices = list(range(200, 250))
+# Training Loop
+print("\nStarting training...")
+for epoch in range(EPOCHS):
+    print(f"\nEpoch {epoch+1}/{EPOCHS}")
+    print("-" * 50)
     
-    train_dataset = Subset(full_train_dataset, train_indices)
-    val_dataset_raw = Subset(full_train_dataset, val_indices)
+    # Train
+    train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
     
-    val_dataset = TransformDataset(val_dataset_raw, transform=val_transforms)
+    # Validate
+    val_loss, val_acc = validate(model, val_loader, criterion, device)
+    
+    # Update scheduler
+    old_lr = optimizer.param_groups[0]['lr']
+    scheduler.step(val_loss)
+    new_lr = optimizer.param_groups[0]['lr']
+    if new_lr != old_lr:
+        print(f"Learning rate reduced from {old_lr} to {new_lr}")
+    
+    # Save history
+    history['train_loss'].append(train_loss)
+    history['train_acc'].append(train_acc)
+    history['val_loss'].append(val_loss)
+    history['val_acc'].append(val_acc)
+    
+    print(f"\nTrain Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
+    print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+    
+    # Save best model
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_acc': val_acc,
+            'class_names': class_names
+        }, 'best_asl_model.pth')
+        print(f"✓ Saved best model (val_acc: {val_acc:.2f}%)")
+        patience_counter = 0
+    else:
+        patience_counter += 1
+    
+    # Early stopping
+    if patience_counter >= patience:
+        print(f"\nEarly stopping triggered after {epoch+1} epochs")
+        break
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+print(f"\nTraining complete! Best validation accuracy: {best_val_acc:.2f}%")
 
-    class_names = full_train_dataset.classes
-    num_classes = len(class_names)
+# Load best model and evaluate
+checkpoint = torch.load('best_asl_model.pth')
+model.load_state_dict(checkpoint['model_state_dict'])
 
-    print("\nDataset Info:")
-    print(f"Number of classes: {num_classes}")
-    print(f"Classes: {class_names}")
-    print(f"Training samples: {len(train_dataset)}")
-    print(f"Validation samples: {len(val_dataset)}")
-    print(f"Total samples used: {len(train_dataset) + len(val_dataset)}")
+print("\nEvaluating on test set...")
+test_loss, test_acc = validate(model, test_loader, criterion, device)
+print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%")
 
-    # OPTIONAL: show sample batch (comment out after you verify once)
-    print("\nDisplaying sample batch...")
-    # show_batch(train_loader, class_names)
+# Detailed test predictions
+print("\nDetailed Test Results:")
+model.eval()
+with torch.no_grad():
+    for i, (inputs, labels) in enumerate(test_loader):
+        inputs = inputs.to(device)
+        outputs = model(inputs)
+        _, predicted = outputs.max(1)
+        
+        for j in range(len(labels)):
+            true_label = class_names[labels[j]]
+            pred_label = class_names[predicted[j]]
+            correct = "✓" if true_label == pred_label else "✗"
+            print(f"{correct} True: {true_label:10s} | Predicted: {pred_label:10s}")
 
-    print("\n" + "=" * 50)
-    print("Creating CNN Model")
-    print("=" * 50)
+# Plot training history
+plt.figure(figsize=(12, 4))
 
-    model = ASL_CNN(num_classes).to(device)
-    print(model)
+plt.subplot(1, 2, 1)
+plt.plot(history['train_acc'], label='Train Accuracy')
+plt.plot(history['val_acc'], label='Val Accuracy')
+plt.title('Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy (%)')
+plt.legend()
+plt.grid(True)
 
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\nTotal parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-    print("\n✓ Model created successfully!")
+plt.subplot(1, 2, 2)
+plt.plot(history['train_loss'], label='Train Loss')
+plt.plot(history['val_loss'], label='Val Loss')
+plt.title('Model Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
 
-    print("\n" + "=" * 50)
-    print("Setting up Training")
-    print("=" * 50)
+plt.tight_layout()
+plt.savefig('training_history.png')
+plt.show()
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3
-    )
+# Inference function for new images
+def predict_sign(image_path, model, class_names, device):
+    model.eval()
+    
+    # Load and transform image
+    img = Image.open(image_path).convert('RGB')
+    img_tensor = test_transform(img).unsqueeze(0).to(device)
+    
+    # Predict
+    with torch.no_grad():
+        output = model(img_tensor)
+        probabilities = torch.softmax(output, dim=1)
+        confidence, predicted = probabilities.max(1)
+    
+    predicted_class = class_names[predicted.item()]
+    confidence_score = confidence.item()
+    
+    return predicted_class, confidence_score
 
-    print(f"Loss Function: CrossEntropyLoss")
-    print(f"Optimizer: Adam (lr={LEARNING_RATE})")
-    print(f"Scheduler: ReduceLROnPlateau (reduces LR if validation loss plateaus)")
-    print("\n✓ Training setup complete!")
-
-    print("\n" + "=" * 50)
-    print("Starting Training")
-    print("=" * 50)
-
-    best_val_acc = 0.0
-
-    for epoch in range(NUM_EPOCHS):
-        print(f"\nEpoch [{epoch + 1}/{NUM_EPOCHS}]")
-
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
-
-        scheduler.step(val_loss)
-
-        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.2f}%")
-
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), "models/best_asl_cnn.pt")
-            print(f"✓ Saved new best model (Val Acc: {best_val_acc:.2f}%)")
-
-    print("\nTraining complete!")
+print("\nModel ready for inference!")
+print("Use: predict_sign('path/to/image.jpg', model, class_names, device)")
