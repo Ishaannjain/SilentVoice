@@ -11,6 +11,7 @@ class VideoLandmarkExtractor:
         video_dir,
         out_dir,
         log_file="failed_landmark_extraction.txt",
+        failed_cache_file="failed_landmark_videos_cache.txt",
         max_frames=250,
         max_seconds=4,
         min_frames=5,
@@ -21,6 +22,7 @@ class VideoLandmarkExtractor:
         self.video_dir = video_dir
         self.out_dir = out_dir
         self.log_file = log_file
+        self.failed_cache_file = failed_cache_file
 
         self.max_frames = max_frames
         self.max_seconds = max_seconds
@@ -31,13 +33,28 @@ class VideoLandmarkExtractor:
 
         os.makedirs(self.out_dir, exist_ok=True)
 
+        # Load failed cache (so we don't keep retrying bad vids)
+        self.failed_videos = set()
+        if os.path.exists(self.failed_cache_file):
+            with open(self.failed_cache_file, "r", encoding="utf-8") as f:
+                self.failed_videos = set(line.strip() for line in f if line.strip())
+
         mp_hands = mp.solutions.hands
         self.hands = mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.6,
-            min_tracking_confidence=0.6,
+            max_num_hands=2,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.7,
         )
+
+    def _mark_failed(self, vid_name: str):
+        if vid_name in self.failed_videos:
+            return
+        self.failed_videos.add(vid_name)
+        with open(self.failed_cache_file, "a", encoding="utf-8") as f:
+            f.write(vid_name + "\n")
+        with open(self.log_file, "a", encoding="utf-8") as log:
+            log.write(vid_name + "\n")
 
     # -------------------------
     # HARD VIDEO VALIDATION
@@ -71,6 +88,9 @@ class VideoLandmarkExtractor:
             cap.release()
             return None
 
+        # Placeholder for a missing hand: 21 landmarks × 3 coords of zeros
+        empty_hand = [0.0] * (21 * 3)
+
         sequence = []
         start_time = time.time()
         frame_count = 0
@@ -94,10 +114,22 @@ class VideoLandmarkExtractor:
 
             if result.multi_hand_landmarks:
                 no_hand_counter = 0
-                hand = result.multi_hand_landmarks[0]
-                frame_landmarks = []
-                for lm in hand.landmark:
-                    frame_landmarks.extend([lm.x, lm.y, lm.z])
+
+                # Sort detected hands into right / left using MediaPipe's label
+                right_hand = None
+                left_hand  = None
+                for i, hand in enumerate(result.multi_hand_landmarks):
+                    handedness = result.multi_handedness[i].classification[0].display_name
+                    lms = []
+                    for lm in hand.landmark:
+                        lms.extend([lm.x, lm.y, lm.z * 0.3])
+                    if handedness == "Right":
+                        right_hand = lms
+                    else:
+                        left_hand = lms
+
+                # Always store as [right(63), left(63)] = 126 features
+                frame_landmarks = (right_hand or empty_hand) + (left_hand or empty_hand)
                 sequence.append(frame_landmarks)
             else:
                 no_hand_counter += 1
@@ -116,38 +148,51 @@ class VideoLandmarkExtractor:
     # MAIN PIPELINE
     # -------------------------
     def run(self):
-        videos = [f for f in os.listdir(self.video_dir) if f.lower().endswith(".mp4")]
+        videos = sorted([f for f in os.listdir(self.video_dir) if f.lower().endswith(".mp4")])
         print(f"Found {len(videos)} .mp4 files")
 
+        done = 0
+        skipped_existing = 0
+        skipped_failed_cache = 0
+        failed = 0
+
         for vid in videos:
+            if vid in self.failed_videos:
+                skipped_failed_cache += 1
+                continue
+
             video_path = os.path.join(self.video_dir, vid)
             out_path = os.path.join(self.out_dir, vid.replace(".mp4", ".npy"))
 
+            # Resume: skip if already extracted
             if os.path.exists(out_path):
+                skipped_existing += 1
                 continue
 
             print(f"Processing {vid}")
 
-            try:
-                landmarks = self._extract_landmarks(video_path)
-                if landmarks is None:
-                    raise RuntimeError("Skipped")
-
-                np.save(out_path, landmarks)
-
-            except Exception:
+            landmarks = self._extract_landmarks(video_path)
+            if landmarks is None:
                 print(f"Failed on {vid}")
-                with open(self.log_file, "a") as log:
-                    log.write(f"{vid}\n")
+                self._mark_failed(vid)
+                failed += 1
+                continue
+
+            np.save(out_path, landmarks)
+            done += 1
+
+        print("\n=== EXTRACTION SUMMARY ===")
+        print("Extracted new:", done)
+        print("Skipped (already exists):", skipped_existing)
+        print("Skipped (failed cache):", skipped_failed_cache)
+        print("Failed newly:", failed)
+        print("Failed videos log:", self.log_file)
+        print("Failed cache:", self.failed_cache_file)
 
 
-# =====================================================
-# AUTO-RUN WHEN FILE IS EXECUTED
-# =====================================================
 if __name__ == "__main__":
     extractor = VideoLandmarkExtractor(
         video_dir="data/videos",
         out_dir="data/landmarks"
     )
-
     extractor.run()
