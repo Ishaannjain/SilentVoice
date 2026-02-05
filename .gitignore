@@ -1,5 +1,23 @@
-/venv
-/data/videos
-__pycache__
-/data/Datasets
-/data/landmarks
+# Python
+__pycache__/
+venv/
+.venv/
+env/
+.env
+
+# Data directories (large files, user-specific)
+data/videos/
+data/Datasets/
+data/landmarks/
+data/landmarks_wlasl100/
+data/landmarks_merged/
+data/calibration/
+data/wlasl100_raw/
+data/selected_words.txt
+data/wlasl100_words.txt
+data/wlasl100_class_mapping.json
+.vscode/
+
+# User-specific calibrated model
+asl_calibrated.pt
+

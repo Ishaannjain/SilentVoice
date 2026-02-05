@@ -3,8 +3,7 @@ import os
 import subprocess
 from collections import Counter, defaultdict
 
-# All three MS-ASL splits — together they cover 25 513 clips across 1 000 words.
-# Using only train.json leaves val+test (9 459 extra clips) on the table.
+
 INPUT_JSONS = [
     os.path.join("data",   "MSASL_train.json"),   # 16 054 entries
     os.path.join("MS-ASL", "MSASL_val.json"),     #  5 287 entries
@@ -13,7 +12,7 @@ INPUT_JSONS = [
 OUTPUT_DIR = os.path.join("data", "videos")
 
 MAX_PER_WORD = 50         # 50 clips/word gives solid training signal
-MAX_WORDS    = 300        # target: 300 words (matches top-300 by frequency)
+MAX_WORDS    = 300        # max distinct words to collect
 
 FAILED_LOG = os.path.join("data", "failed_video_urls.txt")
 WORDLIST_FILE = os.path.join("data", "selected_words.txt")
@@ -21,9 +20,6 @@ WORDLIST_FILE = os.path.join("data", "selected_words.txt")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(FAILED_LOG), exist_ok=True)
 
-# -------------------------
-# Load metadata (all splits)
-# -------------------------
 samples = []
 for json_path in INPUT_JSONS:
     if os.path.exists(json_path):
@@ -80,15 +76,11 @@ else:
     save_wordlist()
     print(f"Pre-selected top {len(selected_words)} words by frequency")
 
-# -------------------------
-# Helper: should we add new words?
-# -------------------------
+
 def can_add_new_word(word: str) -> bool:
     return (word not in selected_words) and (len(selected_words) < MAX_WORDS)
 
-# -------------------------
-# Download loop (fill words to MAX_PER_WORD)
-# -------------------------
+
 for sample in samples:
     word = sample["text"].replace(" ", "_")
 
